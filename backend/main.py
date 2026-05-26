@@ -15,8 +15,10 @@ Endpoints:
 from contextlib import asynccontextmanager
 from typing import List, Optional
 import requests
-from fastapi import FastAPI, HTTPException
+import traceback
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from graph_loader import load_graph, nearest_node
@@ -51,6 +53,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"ERROR: {exc}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__},
+    )
 
 
 # ---------- Models ----------
@@ -162,41 +174,48 @@ def geocode(q: str):
 
 @app.post("/route")
 def route(req: RouteReq):
-    G = STATE["G"]; nodes = STATE["nodes"]; traffic = STATE["traffic"]
-    s = nearest_node(G, req.start.lat, req.start.lon)
-    t = nearest_node(G, req.end.lat, req.end.lon)
-    wfn = make_weight_fn(traffic, req.mode, req.vehicle)
+    try:
+        G = STATE["G"]; nodes = STATE["nodes"]; traffic = STATE["traffic"]
+        s = nearest_node(G, req.start.lat, req.start.lon)
+        t = nearest_node(G, req.end.lat, req.end.lon)
+        wfn = make_weight_fn(traffic, req.mode, req.vehicle)
 
-    if req.algorithm == "astar":
-        scale = 1.0 / (max(p["speed_kmh"] for p in VEHICLE_PROFILES.values()) * 1000 / 3600) \
-                if req.mode == "time" else 1.0
-        result = astar(G, s, t, nodes, wfn, heuristic_scale=scale,
-                       blocked_edges=traffic.blocked_edges)
-    else:
-        result = dijkstra(G, s, t, wfn, blocked_edges=traffic.blocked_edges)
+        if req.algorithm == "astar":
+            scale = 1.0 / (max(p["speed_kmh"] for p in VEHICLE_PROFILES.values()) * 1000 / 3600) \
+                    if req.mode == "time" else 1.0
+            result = astar(G, s, t, nodes, wfn, heuristic_scale=scale,
+                           blocked_edges=traffic.blocked_edges)
+        else:
+            result = dijkstra(G, s, t, wfn, blocked_edges=traffic.blocked_edges)
 
-    if not result["found"]:
-        raise HTTPException(404, "Không tìm thấy đường đi")
+        if not result["found"]:
+            raise HTTPException(404, "Không tìm thấy đường đi")
 
-    dist, time_s = _summarize(result, wfn, G)
-    segs = _make_segments(result["path"], G)
+        dist, time_s = _summarize(result, wfn, G)
+        segs = _make_segments(result["path"], G)
 
-    database.save({
-        "start_label": req.start.label, "end_label": req.end.label,
-        "waypoints": [], "algorithm": req.algorithm,
-        "vehicle": req.vehicle, "mode": req.mode,
-        "distance_m": dist, "time_s": time_s, "runtime_ms": result["runtime_ms"],
-    })
+        database.save({
+            "start_label": req.start.label, "end_label": req.end.label,
+            "waypoints": [], "algorithm": req.algorithm,
+            "vehicle": req.vehicle, "mode": req.mode,
+            "distance_m": dist, "time_s": time_s, "runtime_ms": result["runtime_ms"],
+        })
 
-    return {
-        "coordinates": _path_to_coords(result["path"]),
-        "distance_m": round(dist, 1),
-        "time_s": round(time_s, 1),
-        "segments": segs,
-        "runtime_ms": round(result["runtime_ms"], 2),
-        "visited_nodes": result["visited"],
-        "algorithm": req.algorithm,
-    }
+        return {
+            "coordinates": _path_to_coords(result["path"]),
+            "distance_m": round(dist, 1),
+            "time_s": round(time_s, 1),
+            "segments": segs,
+            "runtime_ms": round(result["runtime_ms"], 2),
+            "visited_nodes": result["visited"],
+            "algorithm": req.algorithm,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[route] ERROR: {e}")
+        traceback.print_exc()
+        raise HTTPException(500, str(e))
 
 
 @app.post("/route/multi")

@@ -93,8 +93,8 @@ export default function ControlPanel({
           <>
             <label>Thuật toán</label>
             <select value={algorithm} onChange={(e) => setAlgorithm(e.target.value)}>
-              <option value="dijkstra">Dijkstra (tự cài)</option>
-              <option value="astar">A* (tự cài)</option>
+              <option value="dijkstra">Dijkstra</option>
+              <option value="astar">A*</option>
             </select>
           </>
         )}

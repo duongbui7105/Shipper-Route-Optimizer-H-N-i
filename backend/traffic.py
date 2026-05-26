@@ -6,9 +6,8 @@ import random
 
 # Tốc độ trung bình thực tế ở Hà Nội (km/h), đã tính tới điều kiện giao thông
 VEHICLE_PROFILES = {
-    "walking":    {"speed_kmh": 5,  "label": "Đi bộ"},
     "motorbike":  {"speed_kmh": 28, "label": "Xe máy"},  # phổ biến cho shipper
-    "car":        {"speed_kmh": 22, "label": "Ô tô"},
+    "car":        {"speed_kmh": 45, "label": "Ô tô"},
 }
 
 

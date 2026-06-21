@@ -43,14 +43,16 @@ class TrafficSimulator:
         for u, v, _key in random.sample(all_edges, k):
             self.edge_factors[(u, v)] = random.uniform(1.5, max_factor)
 
+    def factor(self, u, v):
+        return self.global_factor * self.edge_factors.get((u, v), 1.0)
+
     def weight(self, u, v, edge_data, base_attr="travel_time"):
         """Hàm dùng làm weight_fn cho Dijkstra/A*."""
         base = edge_data.get(base_attr)
         if base is None:
             # fallback: length / speed
             base = edge_data.get("length", 1.0) / 8.33  # 30 km/h default
-        factor = self.global_factor * self.edge_factors.get((u, v), 1.0)
-        return base * factor
+        return base * self.factor(u, v)
 
 
 def make_weight_fn(traffic: TrafficSimulator, mode: str, profile: str):
@@ -60,7 +62,7 @@ def make_weight_fn(traffic: TrafficSimulator, mode: str, profile: str):
     """
     if mode == "distance":
         def w(u, v, ed):
-            return ed.get("length", 1.0)
+            return ed.get("length", 1.0) * traffic.factor(u, v)
         return w
 
     # mode == 'time'
@@ -69,6 +71,5 @@ def make_weight_fn(traffic: TrafficSimulator, mode: str, profile: str):
     def w(u, v, ed):
         length = ed.get("length", 1.0)
         base_time = length / speed_mps  # giây
-        factor = traffic.global_factor * traffic.edge_factors.get((u, v), 1.0)
-        return base_time * factor
+        return base_time * traffic.factor(u, v)
     return w

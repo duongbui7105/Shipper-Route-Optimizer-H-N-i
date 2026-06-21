@@ -7,7 +7,8 @@ import time
 from typing import Callable, Optional
 
 
-def dijkstra(G, source, target, weight_fn: Callable, blocked_edges: Optional[set] = None):
+def dijkstra(G, source, target, weight_fn: Callable, blocked_edges: Optional[set] = None,
+             blocked_nodes: Optional[set] = None):
     """
     Trả về dict {
       'path': [node_ids],
@@ -20,7 +21,12 @@ def dijkstra(G, source, target, weight_fn: Callable, blocked_edges: Optional[set
     blocked_edges: set các (u, v) bị chặn (mô phỏng tuyến đường bị tắc).
     """
     blocked_edges = blocked_edges or set()
+    blocked_nodes = blocked_nodes or set()
     t0 = time.perf_counter()
+
+    if source in blocked_nodes or target in blocked_nodes:
+        return {"path": [], "cost": float("inf"), "visited": 0,
+                "runtime_ms": 0.0, "found": False}
 
     dist = {source: 0.0}
     prev = {}
@@ -40,6 +46,8 @@ def dijkstra(G, source, target, weight_fn: Callable, blocked_edges: Optional[set
 
         # Duyệt các cạnh ra khỏi u. MultiDiGraph: có thể nhiều cạnh giữa 2 node.
         for v, edge_dict in G[u].items():
+            if v in blocked_nodes:
+                continue
             if (u, v) in blocked_edges:
                 continue
             # Lấy cạnh có weight nhỏ nhất giữa u và v

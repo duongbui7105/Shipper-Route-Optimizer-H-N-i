@@ -113,16 +113,35 @@ def _path_to_coords(path):
     return [STATE["nodes"][n] for n in path]
 
 
-def _summarize(result, weight_fn, G):
+def _time_weight_fn(traffic, vehicle):
+    speed_mps = VEHICLE_PROFILES[vehicle]["speed_kmh"] * 1000 / 3600
+
+    def w(u, v, ed):
+        length = ed.get("length", 1.0)
+        return length / speed_mps * traffic.factor(u, v)
+
+    return w
+
+
+def _heuristic_scale(mode, traffic):
+    min_factor = traffic.global_factor
+    if mode == "time":
+        max_speed_mps = max(p["speed_kmh"] for p in VEHICLE_PROFILES.values()) * 1000 / 3600
+        return min_factor / max_speed_mps
+    return min_factor
+
+
+def _summarize(result, weight_fn, G, traffic, vehicle):
     """Tính tổng quãng đường (m) và thời gian (s) cho 1 path."""
     path = result["path"]
     dist = 0.0
     time_s = 0.0
+    time_weight_fn = _time_weight_fn(traffic, vehicle)
     for i in range(len(path) - 1):
         u, v = path[i], path[i + 1]
-        ed = min(G[u][v].values(), key=lambda d: d.get("length", float("inf")))
+        ed = min(G[u][v].values(), key=lambda d: weight_fn(u, v, d))
         dist += ed.get("length", 0.0)
-        time_s += weight_fn(u, v, ed) if weight_fn else ed.get("travel_time", 0.0)
+        time_s += time_weight_fn(u, v, ed)
     return dist, time_s
 
 
@@ -181,9 +200,7 @@ def route(req: RouteReq):
         wfn = make_weight_fn(traffic, req.mode, req.vehicle)
 
         if req.algorithm == "astar":
-            scale = 1.0 / (max(p["speed_kmh"] for p in VEHICLE_PROFILES.values()) * 1000 / 3600) \
-                    if req.mode == "time" else 1.0
-            result = astar(G, s, t, nodes, wfn, heuristic_scale=scale,
+            result = astar(G, s, t, nodes, wfn, heuristic_scale=_heuristic_scale(req.mode, traffic),
                            blocked_edges=traffic.blocked_edges)
         else:
             result = dijkstra(G, s, t, wfn, blocked_edges=traffic.blocked_edges)
@@ -191,7 +208,7 @@ def route(req: RouteReq):
         if not result["found"]:
             raise HTTPException(404, "Không tìm thấy đường đi")
 
-        dist, time_s = _summarize(result, wfn, G)
+        dist, time_s = _summarize(result, wfn, G, traffic, req.vehicle)
         segs = _make_segments(result["path"], G)
 
         database.save({
@@ -227,7 +244,7 @@ def route_multi(req: MultiReq):
     wfn = make_weight_fn(traffic, req.mode, req.vehicle)
 
     res = solve_tsp(G, node_ids, wfn, return_to_start=req.return_to_start)
-    dist, time_s = _summarize({"path": res["full_path"]}, wfn, G)
+    dist, time_s = _summarize({"path": res["full_path"]}, wfn, G, traffic, req.vehicle)
 
     database.save({
         "start_label": req.start.label,
@@ -258,9 +275,7 @@ def compare(req: CompareReq):
     wfn = make_weight_fn(traffic, req.mode, req.vehicle)
 
     d = dijkstra(G, s, t, wfn, blocked_edges=traffic.blocked_edges)
-    scale = 1.0 / (max(p["speed_kmh"] for p in VEHICLE_PROFILES.values()) * 1000 / 3600) \
-            if req.mode == "time" else 1.0
-    a = astar(G, s, t, nodes, wfn, heuristic_scale=scale,
+    a = astar(G, s, t, nodes, wfn, heuristic_scale=_heuristic_scale(req.mode, traffic),
               blocked_edges=traffic.blocked_edges)
 
     if not d["found"] or not a["found"]:
@@ -292,13 +307,13 @@ def alternatives(req: AltReq):
     t = nearest_node(G, req.end.lat, req.end.lon)
     wfn = make_weight_fn(traffic, req.mode, req.vehicle)
 
-    results = k_alternative_routes(G, s, t, wfn, k=req.k)
+    results = k_alternative_routes(G, s, t, wfn, k=req.k, blocked_edges=traffic.blocked_edges)
     if not results:
         raise HTTPException(404, "Không tìm thấy đường đi")
 
     out = []
     for r in results:
-        dist, time_s = _summarize(r, wfn, G)
+        dist, time_s = _summarize(r, wfn, G, traffic, req.vehicle)
         out.append({
             "coordinates": _path_to_coords(r["path"]),
             "distance_m": round(dist, 1),

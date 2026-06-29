@@ -12,6 +12,7 @@ export default function ControlPanel({
   optMode, setOptMode,
   returnToStart, setReturnToStart,
   onFindRoute, onFindMulti, onCompare, onAlternatives,
+  blockMode, setBlockMode, blockedEdges, setBlockedEdges,
   onTrafficChange, onTrafficReset,
   busy,
 }) {
@@ -110,6 +111,51 @@ export default function ControlPanel({
         )}
       </div>
 
+      {mode === 'alt' && (
+        <div className="section">
+          <h3>Đoạn đường bị chặn</h3>
+          <label className="check-row" style={{ marginTop: 4 }}>
+            <input
+              type="checkbox"
+              className="check-input"
+              checked={blockMode}
+              onChange={(e) => setBlockMode(e.target.checked)}
+            />
+            <span className="check-box" aria-hidden="true"></span>
+            <span className="check-label">Chọn đường bị chặn trên bản đồ</span>
+          </label>
+          {blockedEdges.length === 0 ? (
+            <div className="info" style={{ marginTop: 8 }}>Chưa có đoạn đường bị chặn.</div>
+          ) : (
+            <>
+              <ul className="blocked-list">
+                {blockedEdges.map((edge, i) => (
+                  <li key={`${edge.u}-${edge.v}-${edge.key}`}>
+                    <span>
+                      {edge.name || 'Đường không tên'} ({edge.length_m.toFixed(0)}m)
+                    </span>
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      onClick={() => setBlockedEdges((items) => items.filter((_, idx) => idx !== i))}
+                    >
+                      x
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button
+                className="btn btn-secondary"
+                style={{ fontSize: 11, marginTop: 6 }}
+                onClick={() => setBlockedEdges([])}
+              >
+                Đặt lại đoạn chặn
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="section">
         <h3>🚦 Mô phỏng kẹt xe</h3>
         <label>Hệ số chung: <strong>{traffic.toFixed(1)}×</strong></label>
@@ -150,7 +196,7 @@ export default function ControlPanel({
           )}
           {mode === 'alt' && (
             <button className="btn btn-primary" disabled={!start || !end || busy} onClick={onAlternatives}>
-              Tìm 3 tuyến thay thế
+              Tìm tuyến thay thế
             </button>
           )}
         </div>

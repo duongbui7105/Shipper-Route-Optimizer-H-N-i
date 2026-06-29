@@ -29,11 +29,18 @@ function ClickHandler({ onClick }) {
   return null
 }
 
-export default function MapView({ start, end, waypoints, routes, onMapClick }) {
+export default function MapView({
+  start, end, waypoints, routes,
+  blockedEdges = [], onMapClick,
+  blockMode = false,
+}) {
   // Hà Nội center
   const center = [21.0285, 105.8542]
   return (
-    <MapContainer center={center} zoom={12} scrollWheelZoom={true}>
+    <MapContainer
+      className={blockMode ? 'block-mode' : ''}
+      center={center} zoom={12} scrollWheelZoom={true}
+    >
       <TileLayer
         attribution='&copy; OpenStreetMap'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -65,6 +72,19 @@ export default function MapView({ start, end, waypoints, routes, onMapClick }) {
             weight: r.primary ? 6 : 4,
             opacity: r.primary ? 0.85 : 0.55,
             dashArray: r.dash ? '8 8' : null,
+          }}
+        />
+      ))}
+
+      {blockedEdges.map((edge, i) => (
+        <Polyline
+          key={`blocked-${i}-${edge.u}-${edge.v}-${edge.key}`}
+          positions={edge.coordinates}
+          pathOptions={{
+            color: '#cb2431',
+            weight: 7,
+            opacity: 0.9,
+            dashArray: '10 6',
           }}
         />
       ))}

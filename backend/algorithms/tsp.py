@@ -13,7 +13,7 @@ from itertools import permutations
 from algorithms.dijkstra import dijkstra
 
 
-def build_distance_matrix(G, nodes, weight_fn):
+def build_distance_matrix(G, nodes, weight_fn, blocked_edges=None):
     """Trả về ma trận [N][N] cost và [N][N] path (list node_id)."""
     n = len(nodes)
     cost = [[0.0] * n for _ in range(n)]
@@ -22,7 +22,7 @@ def build_distance_matrix(G, nodes, weight_fn):
         for j in range(n):
             if i == j:
                 continue
-            r = dijkstra(G, nodes[i], nodes[j], weight_fn)
+            r = dijkstra(G, nodes[i], nodes[j], weight_fn, blocked_edges=blocked_edges)
             cost[i][j] = r["cost"]
             paths[i][j] = r["path"]
     return cost, paths
@@ -69,7 +69,7 @@ def two_opt(tour, cost, return_to_start=False, max_iter=200):
     return best
 
 
-def solve_tsp(G, point_nodes, weight_fn, return_to_start=False, brute_force_limit=8):
+def solve_tsp(G, point_nodes, weight_fn, return_to_start=False, brute_force_limit=8, blocked_edges=None):
     """
     point_nodes[0] = điểm xuất phát; point_nodes[1..] = các điểm giao hàng.
     Trả về thứ tự ghé thăm tối ưu (indices vào point_nodes), tổng cost, và
@@ -77,7 +77,18 @@ def solve_tsp(G, point_nodes, weight_fn, return_to_start=False, brute_force_limi
     """
     t0 = time.perf_counter()
     n = len(point_nodes)
-    cost, paths = build_distance_matrix(G, point_nodes, weight_fn)
+    cost, paths = build_distance_matrix(G, point_nodes, weight_fn, blocked_edges=blocked_edges)
+    for i in range(n):
+        for j in range(n):
+            if i != j and not paths[i][j]:
+                return {
+                    "order": [],
+                    "total_cost": float("inf"),
+                    "legs": [],
+                    "full_path": [],
+                    "method": "unreachable",
+                    "runtime_ms": (time.perf_counter() - t0) * 1000,
+                }
 
     if n <= brute_force_limit:
         # Brute force: cố định start, thử mọi hoán vị các điểm còn lại

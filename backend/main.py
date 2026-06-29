@@ -5,7 +5,7 @@ Endpoints:
   POST /route               — tìm đường 1 điểm-tới-1 điểm
   POST /route/multi         — tối ưu nhiều điểm giao hàng (TSP)
   POST /route/compare       — so sánh Dijkstra vs A*
-  POST /route/alternatives  — k tuyến thay thế
+  POST /graph/nearest_edge  — tìm cạnh gần nhất trên bản đồ
   POST /traffic/simulate    — bật/tắt mô phỏng kẹt xe
   GET  /history             — lịch sử
   DELETE /history           — xóa lịch sử
@@ -21,12 +21,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from graph_loader import load_graph, nearest_node
+from graph_loader import load_graph, nearest_node, nearest_edge
 from traffic import TrafficSimulator, VEHICLE_PROFILES, make_weight_fn
 from algorithms.dijkstra import dijkstra
 from algorithms.astar import astar
 from algorithms.tsp import solve_tsp
-from algorithms.alternative import k_alternative_routes
 import database
 
 # State toàn cục — load 1 lần lúc khởi động
@@ -35,13 +34,13 @@ STATE = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("=== Khởi động backend ===")
+    print("=== Backend starting ===")
     database.init_db()
     G, nodes_dict = load_graph()
     STATE["G"] = G
     STATE["nodes"] = nodes_dict
     STATE["traffic"] = TrafficSimulator()
-    print("=== Sẵn sàng nhận request ===")
+    print("=== Backend ready ===")
     yield
 
 
@@ -78,6 +77,7 @@ class RouteReq(BaseModel):
     algorithm: str = Field("dijkstra", description="dijkstra | astar")
     vehicle: str = Field("motorbike", description="walking | motorbike | car")
     mode: str = Field("time", description="time | distance")
+    blocked_edges: List[List[int]] = Field(default_factory=list)
 
 
 class MultiReq(BaseModel):
@@ -86,6 +86,7 @@ class MultiReq(BaseModel):
     return_to_start: bool = False
     vehicle: str = "motorbike"
     mode: str = "time"
+    blocked_edges: List[List[int]] = Field(default_factory=list)
 
 
 class CompareReq(BaseModel):
@@ -93,14 +94,12 @@ class CompareReq(BaseModel):
     end: Point
     vehicle: str = "motorbike"
     mode: str = "time"
+    blocked_edges: List[List[int]] = Field(default_factory=list)
 
 
-class AltReq(BaseModel):
-    start: Point
-    end: Point
-    k: int = 3
-    vehicle: str = "motorbike"
-    mode: str = "time"
+class NearestEdgeReq(BaseModel):
+    lat: float
+    lon: float
 
 
 class TrafficReq(BaseModel):
@@ -111,6 +110,24 @@ class TrafficReq(BaseModel):
 # ---------- Helpers ----------
 def _path_to_coords(path):
     return [STATE["nodes"][n] for n in path]
+
+
+def _edge_to_coords(G, u, v, key):
+    ed = G[u][v][key]
+    if "geometry" in ed:
+        return [(lat, lon) for lon, lat in ed["geometry"].coords]
+    return _path_to_coords([u, v])
+
+
+def _blocked_edges_from_req(req_edges, traffic):
+    blocked = set(traffic.blocked_edges)
+    for edge in req_edges or []:
+        if len(edge) < 2:
+            continue
+        u, v = int(edge[0]), int(edge[1])
+        blocked.add((u, v))
+        blocked.add((v, u))
+    return blocked
 
 
 def _time_weight_fn(traffic, vehicle):
@@ -191,6 +208,25 @@ def geocode(q: str):
         raise HTTPException(500, str(e))
 
 
+@app.post("/graph/nearest_edge")
+def graph_nearest_edge(req: NearestEdgeReq):
+    G = STATE["G"]
+    u, v, key, dist = nearest_edge(G, req.lat, req.lon)
+    ed = G[u][v][key]
+    name = ed.get("name", "Đường không tên")
+    if isinstance(name, list):
+        name = name[0]
+    return {
+        "u": u,
+        "v": v,
+        "key": key,
+        "name": name,
+        "length_m": round(ed.get("length", 0.0), 1),
+        "distance_m": round(dist, 1),
+        "coordinates": _edge_to_coords(G, u, v, key),
+    }
+
+
 @app.post("/route")
 def route(req: RouteReq):
     try:
@@ -198,12 +234,13 @@ def route(req: RouteReq):
         s = nearest_node(G, req.start.lat, req.start.lon)
         t = nearest_node(G, req.end.lat, req.end.lon)
         wfn = make_weight_fn(traffic, req.mode, req.vehicle)
+        blocked_edges = _blocked_edges_from_req(req.blocked_edges, traffic)
 
         if req.algorithm == "astar":
             result = astar(G, s, t, nodes, wfn, heuristic_scale=_heuristic_scale(req.mode, traffic),
-                           blocked_edges=traffic.blocked_edges)
+                           blocked_edges=blocked_edges)
         else:
-            result = dijkstra(G, s, t, wfn, blocked_edges=traffic.blocked_edges)
+            result = dijkstra(G, s, t, wfn, blocked_edges=blocked_edges)
 
         if not result["found"]:
             raise HTTPException(404, "Không tìm thấy đường đi")
@@ -242,8 +279,11 @@ def route_multi(req: MultiReq):
     pts = [req.start] + req.waypoints
     node_ids = [nearest_node(G, p.lat, p.lon) for p in pts]
     wfn = make_weight_fn(traffic, req.mode, req.vehicle)
+    blocked_edges = _blocked_edges_from_req(req.blocked_edges, traffic)
 
-    res = solve_tsp(G, node_ids, wfn, return_to_start=req.return_to_start)
+    res = solve_tsp(G, node_ids, wfn, return_to_start=req.return_to_start, blocked_edges=blocked_edges)
+    if not res["full_path"]:
+        raise HTTPException(404, "Khong tim thay duong di")
     dist, time_s = _summarize({"path": res["full_path"]}, wfn, G, traffic, req.vehicle)
 
     database.save({
@@ -273,10 +313,11 @@ def compare(req: CompareReq):
     s = nearest_node(G, req.start.lat, req.start.lon)
     t = nearest_node(G, req.end.lat, req.end.lon)
     wfn = make_weight_fn(traffic, req.mode, req.vehicle)
+    blocked_edges = _blocked_edges_from_req(req.blocked_edges, traffic)
 
-    d = dijkstra(G, s, t, wfn, blocked_edges=traffic.blocked_edges)
+    d = dijkstra(G, s, t, wfn, blocked_edges=blocked_edges)
     a = astar(G, s, t, nodes, wfn, heuristic_scale=_heuristic_scale(req.mode, traffic),
-              blocked_edges=traffic.blocked_edges)
+              blocked_edges=blocked_edges)
 
     if not d["found"] or not a["found"]:
         raise HTTPException(404, "Không tìm thấy đường đi")
@@ -298,29 +339,6 @@ def compare(req: CompareReq):
         "speedup": round(d["runtime_ms"] / a["runtime_ms"], 2) if a["runtime_ms"] > 0 else None,
     }
 
-
-@app.post("/route/alternatives")
-def alternatives(req: AltReq):
-    """Trả về k tuyến thay thế khác nhau."""
-    G = STATE["G"]; traffic = STATE["traffic"]
-    s = nearest_node(G, req.start.lat, req.start.lon)
-    t = nearest_node(G, req.end.lat, req.end.lon)
-    wfn = make_weight_fn(traffic, req.mode, req.vehicle)
-
-    results = k_alternative_routes(G, s, t, wfn, k=req.k, blocked_edges=traffic.blocked_edges)
-    if not results:
-        raise HTTPException(404, "Không tìm thấy đường đi")
-
-    out = []
-    for r in results:
-        dist, time_s = _summarize(r, wfn, G, traffic, req.vehicle)
-        out.append({
-            "coordinates": _path_to_coords(r["path"]),
-            "distance_m": round(dist, 1),
-            "time_s": round(time_s, 1),
-            "cost": round(r["cost"], 2),
-        })
-    return {"routes": out}
 
 
 @app.post("/traffic/simulate")

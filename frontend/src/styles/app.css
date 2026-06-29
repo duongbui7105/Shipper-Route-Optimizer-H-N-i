@@ -78,6 +78,39 @@ input[type=range] { width: 100%; }
 }
 .segments-list .seg { padding: 3px 0; border-bottom: 1px solid #f0f1f3; }
 
+.blocked-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.blocked-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f0f1f3;
+  font-size: 12px;
+}
+.blocked-list li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #d1d5da;
+  border-radius: 5px;
+  background: #fff;
+  color: #cb2431;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
 .history-item {
   padding: 6px 8px; border-radius: 4px; font-size: 12px;
   background: #f6f8fa; margin-bottom: 4px; cursor: default;
@@ -119,3 +152,68 @@ input[type=range] { width: 100%; }
 }
 .geo-results .item { padding: 6px 10px; font-size: 12px; cursor: pointer; border-bottom: 1px solid #f0f1f3; }
 .geo-results .item:hover { background: #f6f8fa; }
+
+/* Crosshair cursor khi bật block mode */
+.leaflet-container.block-mode,
+.leaflet-container.block-mode .leaflet-grab,
+.leaflet-container.block-mode .leaflet-grab:hover,
+.leaflet-container.block-mode .leaflet-interactive {
+  cursor: crosshair !important;
+}
+
+/* Custom checkbox — chỉ dùng cho block mode (label.check-row) */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 0;
+  user-select: none;
+}
+.check-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.check-box {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #d1d5da;
+  border-radius: 5px;
+  background: white;
+  flex: 0 0 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  position: relative;
+}
+.check-box::after {
+  content: "";
+  width: 6px;
+  height: 12px;
+  border: solid white;
+  border-width: 0 3px 3px 0;
+  transform: rotate(45deg) scale(0);
+  transition: transform 0.15s;
+  margin-top: -2px;
+}
+.check-input:hover + .check-box {
+  border-color: #0366d6;
+}
+.check-input:focus-visible + .check-box {
+  box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.3);
+}
+.check-input:checked + .check-box {
+  background: #0366d6;
+  border-color: #0366d6;
+}
+.check-input:checked + .check-box::after {
+  transform: rotate(45deg) scale(1);
+}
+.check-label {
+  flex: 1;
+  line-height: 1.3;
+}

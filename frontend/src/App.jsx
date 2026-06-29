@@ -20,16 +20,39 @@ export default function App() {
   const [routes, setRoutes] = useState([])         // mảng hiển thị trên map
   const [routeInfo, setRouteInfo] = useState(null) // metadata kết quả chính
   const [compareData, setCompareData] = useState(null)
+  const [blockMode, setBlockMode] = useState(false)
+  const [blockedEdges, setBlockedEdges] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [historyKey, setHistoryKey] = useState(0)
 
   const refreshHistory = () => setHistoryKey((k) => k + 1)
+  const blockedEdgePayload = () => blockedEdges.map((e) => [e.u, e.v, e.key])
 
   // Map click handler — quy tắc:
   // - single/compare/alt: click 1 đặt start, click 2 đặt end
   // - multi: click 1 đặt start, các click sau thêm waypoint
-  const handleMapClick = (latlng) => {
+  const handleMapClick = async (latlng) => {
+    if (mode === 'alt' && blockMode) {
+      // Click chọn đường bị chặn — gọi API và hiển thị polyline khi có kết quả
+      try {
+        const edge = await api.nearestEdge(latlng.lat, latlng.lng)
+        if (edge.distance_m > 1000) {
+          setErr(`Click cách đường gần nhất ${edge.distance_m.toFixed(0)} m, vượt ngưỡng 1000 m`)
+          return
+        }
+        setErr('')
+        setBlockedEdges((items) => {
+          if (items.some((e) => e.u === edge.u && e.v === edge.v && e.key === edge.key)) {
+            return items
+          }
+          return [...items, edge]
+        })
+      } catch (e) {
+        setErr(String(e.message || e))
+      }
+      return
+    }
     const p = { lat: latlng.lat, lon: latlng.lng }
     if (!start) { setStart(p); return }
     if (mode === 'multi') {
@@ -47,7 +70,7 @@ export default function App() {
   const runFindRoute = async () => {
     clearOutputs(); setBusy(true)
     try {
-      const r = await api.findRoute(start, end, algorithm, vehicle, optMode)
+      const r = await api.findRoute(start, end, algorithm, vehicle, optMode, blockedEdgePayload())
       setRoutes([{ coordinates: r.coordinates, primary: true, color: '#0366d6' }])
       setRouteInfo(r)
       refreshHistory()
@@ -58,7 +81,7 @@ export default function App() {
   const runFindMulti = async () => {
     clearOutputs(); setBusy(true)
     try {
-      const r = await api.findMultiRoute(start, waypoints, vehicle, optMode, returnToStart)
+      const r = await api.findMultiRoute(start, waypoints, vehicle, optMode, returnToStart, blockedEdgePayload())
       setRoutes([{ coordinates: r.coordinates, primary: true, color: '#0366d6' }])
       setRouteInfo({
         ...r,
@@ -77,7 +100,7 @@ export default function App() {
   const runCompare = async () => {
     clearOutputs(); setBusy(true)
     try {
-      const r = await api.compare(start, end, vehicle, optMode)
+      const r = await api.compare(start, end, vehicle, optMode, blockedEdgePayload())
       setRoutes([
         { coordinates: r.dijkstra.coordinates, primary: true, color: '#0366d6' },
         { coordinates: r.astar.coordinates, primary: false, color: '#28a745', dash: true },
@@ -91,22 +114,16 @@ export default function App() {
   const runAlternatives = async () => {
     clearOutputs(); setBusy(true)
     try {
-      const r = await api.alternatives(start, end, 3, vehicle, optMode)
-      const colors = ['#0366d6', '#28a745', '#f0a020']
-      setRoutes(r.routes.map((rt, i) => ({
-        coordinates: rt.coordinates,
-        primary: i === 0,
-        color: colors[i % colors.length],
-      })))
+      const route = await api.findRoute(start, end, algorithm, vehicle, optMode, blockedEdgePayload())
+      setRoutes([{ coordinates: route.coordinates, primary: true, color: '#0366d6' }])
       setRouteInfo({
-        distance_m: r.routes[0].distance_m,
-        time_s: r.routes[0].time_s,
-        algorithm: `Tuyến chính + ${r.routes.length - 1} thay thế`,
+        ...route,
+        algorithm: `Tuyến tối ưu (tránh ${blockedEdges.length} đoạn chặn)`,
       })
+      refreshHistory()
     } catch (e) { setErr(String(e.message || e)) }
     setBusy(false)
   }
-
   const onTrafficChange = async (factor, frac) => {
     try { await api.setTraffic(factor, frac) } catch (e) { console.error(e) }
   }
@@ -136,6 +153,10 @@ export default function App() {
           onFindMulti={runFindMulti}
           onCompare={runCompare}
           onAlternatives={runAlternatives}
+          blockMode={blockMode}
+          setBlockMode={setBlockMode}
+          blockedEdges={blockedEdges}
+          setBlockedEdges={setBlockedEdges}
           onTrafficChange={onTrafficChange}
           onTrafficReset={onTrafficReset}
           busy={busy}
@@ -150,7 +171,9 @@ export default function App() {
         <MapView
           start={start} end={end} waypoints={waypoints}
           routes={routes}
+          blockedEdges={blockedEdges}
           onMapClick={handleMapClick}
+          blockMode={blockMode}
         />
         <div className="legend">
           <div className="item"><span className="dot" style={{ background: '#28a745', width: 10, height: 10, borderRadius: '50%' }}></span>Xuất phát</div>

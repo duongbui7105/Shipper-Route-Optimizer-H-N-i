@@ -24,17 +24,17 @@ async function del(path) {
 }
 
 export const api = {
-  findRoute: (start, end, algorithm, vehicle, mode) =>
-    post('/route', { start, end, algorithm, vehicle, mode }),
+  nearestEdge: (lat, lon) =>
+    post('/graph/nearest_edge', { lat, lon }),
 
-  findMultiRoute: (start, waypoints, vehicle, mode, return_to_start = false) =>
-    post('/route/multi', { start, waypoints, vehicle, mode, return_to_start }),
+  findRoute: (start, end, algorithm, vehicle, mode, blocked_edges = []) =>
+    post('/route', { start, end, algorithm, vehicle, mode, blocked_edges }),
 
-  compare: (start, end, vehicle, mode) =>
-    post('/route/compare', { start, end, vehicle, mode }),
+  findMultiRoute: (start, waypoints, vehicle, mode, return_to_start = false, blocked_edges = []) =>
+    post('/route/multi', { start, waypoints, vehicle, mode, return_to_start, blocked_edges }),
 
-  alternatives: (start, end, k = 3, vehicle = 'motorbike', mode = 'time') =>
-    post('/route/alternatives', { start, end, k, vehicle, mode }),
+  compare: (start, end, vehicle, mode, blocked_edges = []) =>
+    post('/route/compare', { start, end, vehicle, mode, blocked_edges }),
 
   setTraffic: (global_factor, random_fraction = 0) =>
     post('/traffic/simulate', { global_factor, random_fraction }),
